@@ -1002,7 +1002,7 @@ local camera = workspace.CurrentCamera
 -- local state
 local lastLocalDashRequest = 0
 local LOCAL_REQUEST_COOLDOWN = 0.25 -- rate-limit client requests a bit
-local DASH_DISTANCE = 25 -- studs (increased for more "strongest" feel, like SB)
+local DASH_DISTANCE = 100 -- studs (increased significantly for TSB-like long-range dash feel)
 
 -- ---------- Utility visual effects ----------
 local function cameraShake(duration, magnitude)
@@ -1027,11 +1027,11 @@ local function cameraShake(duration, magnitude)
 end
 
 local function spawnLightningBetween(a, b, color)
-    -- create a visual lightning made of thin neon parts between a and b, more segments for SB-like effect
+    -- create a visual lightning made of thin neon parts between a and b, more segments for TSB-like dense effect
     local dir = (b - a)
     local len = dir.Magnitude
     if len <= 0 then return end
-    local segments = math.clamp(math.floor(len / 3), 3, 30) -- more segments for denser lightning
+    local segments = math.clamp(math.floor(len / 2), 5, 50) -- even more segments for denser, chaotic TSB lightning
     local parent = Instance.new("Folder")
     parent.Name = "DashLightning"
     parent.Parent = workspace
@@ -1040,60 +1040,60 @@ local function spawnLightningBetween(a, b, color)
     for i = 1, segments do
         local t = i / segments
         local point = a + dir * t
-        -- jitter to look electric, increased for more chaotic SB feel
-        local jitter = Vector3.new((math.random()-0.5)*2.2, (math.random()-0.5)*2.2, (math.random()-0.5)*2.2)
-        local segPos = point + jitter * (1 - math.abs(0.5 - t)) * 0.8
+        -- increased jitter for more electric, TSB-style chaos
+        local jitter = Vector3.new((math.random()-0.5)*3, (math.random()-0.5)*3, (math.random()-0.5)*3)
+        local segPos = point + jitter * (1 - math.abs(0.5 - t)) * 1.2
 
         local part = Instance.new("Part")
         part.Anchored = true
         part.CanCollide = false
         part.Material = Enum.Material.Neon
-        part.Size = Vector3.new(0.15, 0.15, (segPos - prev).Magnitude) -- thinner for SB style
+        part.Size = Vector3.new(0.1, 0.1, (segPos - prev).Magnitude) -- thinner for TSB style
         part.CFrame = CFrame.new((segPos + prev) / 2, segPos) * CFrame.Angles(math.pi/2, 0, 0)
         part.Color = color or Color3.fromRGB(170, 60, 255)
         part.Parent = parent
         prev = segPos
-        Debris:AddItem(part, 0.4) -- slightly longer lifetime
+        Debris:AddItem(part, 0.6) -- slightly longer lifetime for visibility over longer distance
     end
-    Debris:AddItem(parent, 0.5)
+    Debris:AddItem(parent, 0.7)
 end
 
 local function spawnDashTrail(originCF)
-    -- subtle purple trail effect at originCFrame, with particles for SB flair
+    -- enhanced purple trail effect at originCFrame, with more particles for TSB flair
     local orb = Instance.new("Part")
     orb.Shape = Enum.PartType.Ball
-    orb.Size = Vector3.new(2,2,2) -- larger for impact
+    orb.Size = Vector3.new(3,3,3) -- larger for TSB impact
     orb.Material = Enum.Material.Neon
     orb.Color = Color3.fromRGB(160, 70, 255)
     orb.Anchored = true
     orb.CanCollide = false
     orb.CFrame = originCF
     orb.Parent = workspace
-    Debris:AddItem(orb, 0.7)
+    Debris:AddItem(orb, 1)
     -- grow and fade
-    local tween = TweenService:Create(orb, TweenInfo.new(0.6, Enum.EasingStyle.Quad), {Size = Vector3.new(4.5,4.5,4.5), Transparency = 1})
+    local tween = TweenService:Create(orb, TweenInfo.new(0.8, Enum.EasingStyle.Quad), {Size = Vector3.new(6,6,6), Transparency = 1})
     tween:Play()
 
-    -- Add particle effect for extra SB-like trail
+    -- Add enhanced particle effect for extra TSB-like trail
     local emitter = Instance.new("ParticleEmitter")
     emitter.Texture = "rbxassetid://241685484" -- simple spark texture
-    emitter.Size = NumberSequence.new(0.5, 0)
-    emitter.Lifetime = NumberRange.new(0.5, 1)
-    emitter.Rate = 100
-    emitter.Speed = NumberRange.new(5, 15)
+    emitter.Size = NumberSequence.new(0.8, 0)
+    emitter.Lifetime = NumberRange.new(0.7, 1.2)
+    emitter.Rate = 150
+    emitter.Speed = NumberRange.new(8, 20)
     emitter.Color = ColorSequence.new(Color3.fromRGB(170, 60, 255))
     emitter.Parent = orb
-    task.delay(0.1, function() emitter.Enabled = false end)
+    task.delay(0.2, function() emitter.Enabled = false end)
 end
 
 local function playDashSound()
-    -- Play a zap/whoosh sound like in SB
+    -- Play a zap/whoosh sound like in TSB
     local sound = Instance.new("Sound")
-    sound.SoundId = "rbxassetid://142929386" -- Example zap sound; replace with actual SB-like sound ID if available
-    sound.Volume = 0.8
+    sound.SoundId = "rbxassetid://142929386" -- Example zap sound; replace with actual TSB-like sound ID if available
+    sound.Volume = 1
     sound.Parent = workspace
     sound:Play()
-    Debris:AddItem(sound, 1)
+    Debris:AddItem(sound, 1.5)
 end
 
 -- ---------- Perform dash locally ----------
@@ -1117,12 +1117,12 @@ local function performDash(distance)
     local origin = hrp.Position
     local target = origin + lookDir * distance
 
-    -- Perform the dash: teleport instantly (like SB)
+    -- Perform the dash: teleport instantly (like TSB)
     hrp.CFrame = CFrame.new(target) * (hrp.CFrame - hrp.CFrame.Position)  -- Preserve rotation
 
     -- Play effects
-    -- camera shake
-    cameraShake(0.4, 2) -- stronger shake
+    -- stronger camera shake for TSB feel
+    cameraShake(0.5, 3)
 
     -- lightning bolt from origin to target
     spawnLightningBetween(origin, target, Color3.fromRGB(165, 60, 255))
@@ -1134,7 +1134,7 @@ local function performDash(distance)
     -- play sound
     playDashSound()
 
-    -- subtle screen flash (using a ScreenGui)
+    -- more intense screen flash (using a ScreenGui)
     local gui = Instance.new("ScreenGui")
     gui.ResetOnSpawn = false
     gui.Name = "DashFlash"
@@ -1144,11 +1144,11 @@ local function performDash(distance)
     rect.Size = UDim2.new(2,0,2,0)
     rect.Position = UDim2.new(0.5,0,0.5,0)
     rect.BackgroundColor3 = Color3.fromRGB(200, 120, 255)
-    rect.BackgroundTransparency = 0.9 -- less transparent for more flash
+    rect.BackgroundTransparency = 0.8 -- more opaque for stronger TSB flash
     rect.ZIndex = 99999
-    Debris:AddItem(gui, 0.4)
+    Debris:AddItem(gui, 0.5)
     -- flash tween
-    TweenService:Create(rect, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {BackgroundTransparency = 1}):Play()
+    TweenService:Create(rect, TweenInfo.new(0.4, Enum.EasingStyle.Quad), {BackgroundTransparency = 1}):Play()
 end
 
 -- ---------- Integrate with your existing client modules ----------
