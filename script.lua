@@ -948,6 +948,51 @@ player.CharacterAdded:Connect(function(chr)
 	Modules.JumpModule.Init(Humanoid)
 	Modules.HollowPurpleModule.Cleanup()
 end)
+local CoordsUI = Instance.new("ScreenGui")
+CoordsUI.Name = "CoordsUI"
+CoordsUI.ResetOnSpawn = false
+CoordsUI.Parent = player:WaitForChild("PlayerGui")
+
+-- Create Background Frame
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 220, 0, 60)
+frame.Position = UDim2.new(1, -230, 1, -70)
+frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+frame.BackgroundTransparency = 0.25
+frame.BorderSizePixel = 0
+frame.Parent = CoordsUI
+
+-- Add Corner and Shadow
+local corner = Instance.new("UICorner", frame)
+corner.CornerRadius = UDim.new(0, 10)
+
+local stroke = Instance.new("UIStroke", frame)
+stroke.Thickness = 1
+stroke.Color = Color3.fromRGB(90, 90, 90)
+stroke.Transparency = 0.3
+
+-- Create TextLabel
+local coordLabel = Instance.new("TextLabel")
+coordLabel.Size = UDim2.new(1, -10, 1, -10)
+coordLabel.Position = UDim2.new(0, 5, 0, 5)
+coordLabel.BackgroundTransparency = 1
+coordLabel.Text = "X: 0\nY: 0\nZ: 0"
+coordLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+coordLabel.TextStrokeTransparency = 0.7
+coordLabel.TextSize = 16
+coordLabel.Font = Enum.Font.GothamMedium
+coordLabel.TextXAlignment = Enum.TextXAlignment.Left
+coordLabel.TextYAlignment = Enum.TextYAlignment.Top
+coordLabel.Parent = frame
+
+-- Update loop
+RunService.RenderStepped:Connect(function()
+	local character = player.Character
+	if character and character:FindFirstChild("HumanoidRootPart") then
+		local pos = character.HumanoidRootPart.Position
+		coordLabel.Text = string.format("X: %.1f\nY: %.1f\nZ: %.1f", pos.X, pos.Y, pos.Z)
+	end
+end)
 
 -- Initial module init values
 Modules.SpeedModule.Init(Humanoid)
