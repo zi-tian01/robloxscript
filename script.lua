@@ -1002,7 +1002,7 @@ local camera = workspace.CurrentCamera
 -- local state
 local lastLocalDashRequest = 0
 local LOCAL_REQUEST_COOLDOWN = 0.25 -- rate-limit client requests a bit
-local DASH_DISTANCE = 20 -- studs
+local DASH_DISTANCE = 25 -- studs (increased for more "strongest" feel, like SB)
 
 -- ---------- Utility visual effects ----------
 local function cameraShake(duration, magnitude)
@@ -1027,11 +1027,11 @@ local function cameraShake(duration, magnitude)
 end
 
 local function spawnLightningBetween(a, b, color)
-    -- create a visual lightning made of thin neon parts between a and b
+    -- create a visual lightning made of thin neon parts between a and b, more segments for SB-like effect
     local dir = (b - a)
     local len = dir.Magnitude
     if len <= 0 then return end
-    local segments = math.clamp(math.floor(len / 4), 2, 24)
+    local segments = math.clamp(math.floor(len / 3), 3, 30) -- more segments for denser lightning
     local parent = Instance.new("Folder")
     parent.Name = "DashLightning"
     parent.Parent = workspace
@@ -1040,39 +1040,60 @@ local function spawnLightningBetween(a, b, color)
     for i = 1, segments do
         local t = i / segments
         local point = a + dir * t
-        -- jitter to look electric
-        local jitter = Vector3.new((math.random()-0.5)*1.6, (math.random()-0.5)*1.6, (math.random()-0.5)*1.6)
-        local segPos = point + jitter * (1 - math.abs(0.5 - t)) * 0.6
+        -- jitter to look electric, increased for more chaotic SB feel
+        local jitter = Vector3.new((math.random()-0.5)*2.2, (math.random()-0.5)*2.2, (math.random()-0.5)*2.2)
+        local segPos = point + jitter * (1 - math.abs(0.5 - t)) * 0.8
 
         local part = Instance.new("Part")
         part.Anchored = true
         part.CanCollide = false
         part.Material = Enum.Material.Neon
-        part.Size = Vector3.new(0.2, 0.2, (segPos - prev).Magnitude)
+        part.Size = Vector3.new(0.15, 0.15, (segPos - prev).Magnitude) -- thinner for SB style
         part.CFrame = CFrame.new((segPos + prev) / 2, segPos) * CFrame.Angles(math.pi/2, 0, 0)
         part.Color = color or Color3.fromRGB(170, 60, 255)
         part.Parent = parent
         prev = segPos
-        Debris:AddItem(part, 0.35)
+        Debris:AddItem(part, 0.4) -- slightly longer lifetime
     end
-    Debris:AddItem(parent, 0.45)
+    Debris:AddItem(parent, 0.5)
 end
 
 local function spawnDashTrail(originCF)
-    -- subtle purple trail effect at originCFrame
+    -- subtle purple trail effect at originCFrame, with particles for SB flair
     local orb = Instance.new("Part")
     orb.Shape = Enum.PartType.Ball
-    orb.Size = Vector3.new(1.6,1.6,1.6)
+    orb.Size = Vector3.new(2,2,2) -- larger for impact
     orb.Material = Enum.Material.Neon
     orb.Color = Color3.fromRGB(160, 70, 255)
     orb.Anchored = true
     orb.CanCollide = false
     orb.CFrame = originCF
     orb.Parent = workspace
-    Debris:AddItem(orb, 0.6)
+    Debris:AddItem(orb, 0.7)
     -- grow and fade
-    local tween = TweenService:Create(orb, TweenInfo.new(0.55, Enum.EasingStyle.Quad), {Size = Vector3.new(3.8,3.8,3.8), Transparency = 1})
+    local tween = TweenService:Create(orb, TweenInfo.new(0.6, Enum.EasingStyle.Quad), {Size = Vector3.new(4.5,4.5,4.5), Transparency = 1})
     tween:Play()
+
+    -- Add particle effect for extra SB-like trail
+    local emitter = Instance.new("ParticleEmitter")
+    emitter.Texture = "rbxassetid://241685484" -- simple spark texture
+    emitter.Size = NumberSequence.new(0.5, 0)
+    emitter.Lifetime = NumberRange.new(0.5, 1)
+    emitter.Rate = 100
+    emitter.Speed = NumberRange.new(5, 15)
+    emitter.Color = ColorSequence.new(Color3.fromRGB(170, 60, 255))
+    emitter.Parent = orb
+    task.delay(0.1, function() emitter.Enabled = false end)
+end
+
+local function playDashSound()
+    -- Play a zap/whoosh sound like in SB
+    local sound = Instance.new("Sound")
+    sound.SoundId = "rbxassetid://142929386" -- Example zap sound; replace with actual SB-like sound ID if available
+    sound.Volume = 0.8
+    sound.Parent = workspace
+    sound:Play()
+    Debris:AddItem(sound, 1)
 end
 
 -- ---------- Perform dash locally ----------
@@ -1096,12 +1117,12 @@ local function performDash(distance)
     local origin = hrp.Position
     local target = origin + lookDir * distance
 
-    -- Perform the dash: teleport instantly (or you could tween for smoother movement)
+    -- Perform the dash: teleport instantly (like SB)
     hrp.CFrame = CFrame.new(target) * (hrp.CFrame - hrp.CFrame.Position)  -- Preserve rotation
 
     -- Play effects
-    -- small camera shake
-    cameraShake(0.36, 1.6)
+    -- camera shake
+    cameraShake(0.4, 2) -- stronger shake
 
     -- lightning bolt from origin to target
     spawnLightningBetween(origin, target, Color3.fromRGB(165, 60, 255))
@@ -1109,6 +1130,9 @@ local function performDash(distance)
     -- purple trail at the landed spot
     local cf = CFrame.new(target)
     spawnDashTrail(cf)
+
+    -- play sound
+    playDashSound()
 
     -- subtle screen flash (using a ScreenGui)
     local gui = Instance.new("ScreenGui")
@@ -1120,20 +1144,20 @@ local function performDash(distance)
     rect.Size = UDim2.new(2,0,2,0)
     rect.Position = UDim2.new(0.5,0,0.5,0)
     rect.BackgroundColor3 = Color3.fromRGB(200, 120, 255)
-    rect.BackgroundTransparency = 0.95
+    rect.BackgroundTransparency = 0.9 -- less transparent for more flash
     rect.ZIndex = 99999
-    Debris:AddItem(gui, 0.35)
+    Debris:AddItem(gui, 0.4)
     -- flash tween
-    TweenService:Create(rect, TweenInfo.new(0.28, Enum.EasingStyle.Quad), {BackgroundTransparency = 1}):Play()
+    TweenService:Create(rect, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {BackgroundTransparency = 1}):Play()
 end
 
 -- ---------- Integrate with your existing client modules ----------
--- Keybind E triggers dash with default distance.
+-- Keybind Q triggers dash with default distance (changed from E to Q).
 
 UIS.InputBegan:Connect(function(input, processed)
     if processed then return end
     if input.UserInputType == Enum.UserInputType.Keyboard then
-        if input.KeyCode == Enum.KeyCode.E then
+        if input.KeyCode == Enum.KeyCode.Q then  -- Changed to Q
             -- Perform dash directly
             performDash(DASH_DISTANCE)
         end
@@ -1143,7 +1167,7 @@ end)
 -- Optional: expose performDash to global so other client code (GUI buttons) can call it:
 _G.PerformDash = performDash
 
-print("[AdminClient] Dash loaded — press E to dash.")
+print("[AdminClient] Dash loaded — press Q to dash.")
 
 -- Initial module init values
 Modules.SpeedModule.Init(Humanoid)
