@@ -993,6 +993,157 @@ RunService.RenderStepped:Connect(function()
 		coordLabel.Text = string.format("X: %.1f\nY: %.1f\nZ: %.1f", pos.X, pos.Y, pos.Z)
 	end
 end)
+local camera = workspace.CurrentCamera
+
+-- No RemoteEvent needed since we're making it client-side
+-- Removed: local folder = ReplicatedStorage:WaitForChild("AdminRemoteFolder")
+-- Removed: local AdminEvent = folder:WaitForChild("AdminEvent")
+
+-- local state
+local lastLocalDashRequest = 0
+local LOCAL_REQUEST_COOLDOWN = 0.25 -- rate-limit client requests a bit
+local DASH_DISTANCE = 20 -- studs
+
+-- ---------- Utility visual effects ----------
+local function cameraShake(duration, magnitude)
+    local cam = workspace.CurrentCamera
+    if not cam then return end
+    local t0 = tick()
+    local conn
+    conn = RunService.RenderStepped:Connect(function()
+        local now = tick()
+        local elapsed = now - t0
+        if elapsed > duration then
+            conn:Disconnect()
+            return
+        end
+        local damper = 1 - (elapsed / duration)
+        local x = (math.noise(now*20, 1) - 0.5) * 2 * magnitude * damper
+        local y = (math.noise(now*20, 2) - 0.5) * 2 * magnitude * damper
+        local z = (math.noise(now*20, 3) - 0.5) * 2 * magnitude * damper
+        local cf = cam.CFrame
+        cam.CFrame = CFrame.new(cf.Position) * CFrame.Angles(math.rad(x), math.rad(y), math.rad(z))
+    end)
+end
+
+local function spawnLightningBetween(a, b, color)
+    -- create a visual lightning made of thin neon parts between a and b
+    local dir = (b - a)
+    local len = dir.Magnitude
+    if len <= 0 then return end
+    local segments = math.clamp(math.floor(len / 4), 2, 24)
+    local parent = Instance.new("Folder")
+    parent.Name = "DashLightning"
+    parent.Parent = workspace
+
+    local prev = a
+    for i = 1, segments do
+        local t = i / segments
+        local point = a + dir * t
+        -- jitter to look electric
+        local jitter = Vector3.new((math.random()-0.5)*1.6, (math.random()-0.5)*1.6, (math.random()-0.5)*1.6)
+        local segPos = point + jitter * (1 - math.abs(0.5 - t)) * 0.6
+
+        local part = Instance.new("Part")
+        part.Anchored = true
+        part.CanCollide = false
+        part.Material = Enum.Material.Neon
+        part.Size = Vector3.new(0.2, 0.2, (segPos - prev).Magnitude)
+        part.CFrame = CFrame.new((segPos + prev) / 2, segPos) * CFrame.Angles(math.pi/2, 0, 0)
+        part.Color = color or Color3.fromRGB(170, 60, 255)
+        part.Parent = parent
+        prev = segPos
+        Debris:AddItem(part, 0.35)
+    end
+    Debris:AddItem(parent, 0.45)
+end
+
+local function spawnDashTrail(originCF)
+    -- subtle purple trail effect at originCFrame
+    local orb = Instance.new("Part")
+    orb.Shape = Enum.PartType.Ball
+    orb.Size = Vector3.new(1.6,1.6,1.6)
+    orb.Material = Enum.Material.Neon
+    orb.Color = Color3.fromRGB(160, 70, 255)
+    orb.Anchored = true
+    orb.CanCollide = false
+    orb.CFrame = originCF
+    orb.Parent = workspace
+    Debris:AddItem(orb, 0.6)
+    -- grow and fade
+    local tween = TweenService:Create(orb, TweenInfo.new(0.55, Enum.EasingStyle.Quad), {Size = Vector3.new(3.8,3.8,3.8), Transparency = 1})
+    tween:Play()
+end
+
+-- ---------- Perform dash locally ----------
+local function performDash(distance)
+    -- rate-limit local spam
+    if tick() - lastLocalDashRequest < LOCAL_REQUEST_COOLDOWN then return end
+    lastLocalDashRequest = tick()
+
+    local player = game.Players.LocalPlayer
+    local char = player.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    local hum = char:FindFirstChild("Humanoid")
+    if not hum then return end
+
+    -- Calculate target position: forward from camera look vector
+    local cam = workspace.CurrentCamera
+    if not cam then return end
+    local lookDir = cam.CFrame.LookVector
+    local origin = hrp.Position
+    local target = origin + lookDir * distance
+
+    -- Perform the dash: teleport instantly (or you could tween for smoother movement)
+    hrp.CFrame = CFrame.new(target) * (hrp.CFrame - hrp.CFrame.Position)  -- Preserve rotation
+
+    -- Play effects
+    -- small camera shake
+    cameraShake(0.36, 1.6)
+
+    -- lightning bolt from origin to target
+    spawnLightningBetween(origin, target, Color3.fromRGB(165, 60, 255))
+
+    -- purple trail at the landed spot
+    local cf = CFrame.new(target)
+    spawnDashTrail(cf)
+
+    -- subtle screen flash (using a ScreenGui)
+    local gui = Instance.new("ScreenGui")
+    gui.ResetOnSpawn = false
+    gui.Name = "DashFlash"
+    gui.Parent = player:WaitForChild("PlayerGui")
+    local rect = Instance.new("Frame", gui)
+    rect.AnchorPoint = Vector2.new(0.5,0.5)
+    rect.Size = UDim2.new(2,0,2,0)
+    rect.Position = UDim2.new(0.5,0,0.5,0)
+    rect.BackgroundColor3 = Color3.fromRGB(200, 120, 255)
+    rect.BackgroundTransparency = 0.95
+    rect.ZIndex = 99999
+    Debris:AddItem(gui, 0.35)
+    -- flash tween
+    TweenService:Create(rect, TweenInfo.new(0.28, Enum.EasingStyle.Quad), {BackgroundTransparency = 1}):Play()
+end
+
+-- ---------- Integrate with your existing client modules ----------
+-- Keybind E triggers dash with default distance.
+
+UIS.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if input.UserInputType == Enum.UserInputType.Keyboard then
+        if input.KeyCode == Enum.KeyCode.E then
+            -- Perform dash directly
+            performDash(DASH_DISTANCE)
+        end
+    end
+end)
+
+-- Optional: expose performDash to global so other client code (GUI buttons) can call it:
+_G.PerformDash = performDash
+
+print("[AdminClient] Dash loaded — press E to dash.")
 
 -- Initial module init values
 Modules.SpeedModule.Init(Humanoid)
