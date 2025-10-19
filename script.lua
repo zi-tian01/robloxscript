@@ -22,6 +22,7 @@ local Humanoid = Character:WaitForChild("Humanoid")
 local HRP = Character:WaitForChild("HumanoidRootPart")
 local Camera = workspace.CurrentCamera
 
+
 -- Keep references updated on respawn
 player.CharacterAdded:Connect(function(chr)
 	Character = chr
@@ -835,7 +836,7 @@ end
 do
 	-- Speed knob dragging
 	local draggingSpeed = false
-	local minSpeed, maxSpeed = 10, 500
+	local minSpeed, maxSpeed = 10, 1000000
 	local speedTrack = UI.SpeedTrack
 	local speedKnob = UI.SpeedKnob
 	local speedLabel = UI.SpeedLabel
@@ -869,7 +870,7 @@ do
 	local jumpTrack = UI.JumpTrack
 	local jumpKnob = UI.JumpKnob
 	local jumpLabel = UI.JumpLabel
-	local minJump, maxJump = 10, 500
+	local minJump, maxJump = 10, 100000
 
 	jumpKnob.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -951,6 +952,5 @@ end)
 -- Initial module init values
 Modules.SpeedModule.Init(Humanoid)
 Modules.JumpModule.Init(Humanoid)
-
 -- Final note
 print("[ClientAdmin] Loaded: Client-only admin GUI (visuals & local movement). Hollow Purple is visual-only and launches forward.")
