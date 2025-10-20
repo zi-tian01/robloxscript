@@ -836,7 +836,7 @@ end
 do
 	-- Speed knob dragging
 	local draggingSpeed = false
-	local minSpeed, maxSpeed = 10, 1000000
+	local minSpeed, maxSpeed = 10, 1000
 	local speedTrack = UI.SpeedTrack
 	local speedKnob = UI.SpeedKnob
 	local speedLabel = UI.SpeedLabel
@@ -870,7 +870,7 @@ do
 	local jumpTrack = UI.JumpTrack
 	local jumpKnob = UI.JumpKnob
 	local jumpLabel = UI.JumpLabel
-	local minJump, maxJump = 10, 100000
+	local minJump, maxJump = 10, 1000
 
 	jumpKnob.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 then
