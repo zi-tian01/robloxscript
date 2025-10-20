@@ -1,14 +1,14 @@
 -- All-in-one Client-only Admin (LocalScript)
 -- Place this LocalScript in StarterPlayer > StarterPlayerScripts
--- Fully client-side: visuals, local fly, local noclip, local teleport, Hollow Purple visual projectile + camera shake
--- DOES NOT create server-side damage or explosions. Safe for "everyone" as visuals/local movement only.
+-- Fully client-side: visuals, local fly, local noclip, local teleport, Hollow Purple visual projectile + camera shake, TSB-like dash, Infinity visual barrier
+-- DOES NOT create server-side damage or affect other players. Safe for "everyone" as visuals/local movement only.
 
 -- Services
-local Players       = game:GetService("Players")
-local UIS           = game:GetService("UserInputService")
-local RunService    = game:GetService("RunService")
-local TweenService  = game:GetService("TweenService")
-local Debris        = game:GetService("Debris")
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Debris = game:GetService("Debris")
 
 local player = Players.LocalPlayer
 
@@ -21,7 +21,6 @@ local Character = getCharacter()
 local Humanoid = Character:WaitForChild("Humanoid")
 local HRP = Character:WaitForChild("HumanoidRootPart")
 local Camera = workspace.CurrentCamera
-
 
 -- Keep references updated on respawn
 player.CharacterAdded:Connect(function(chr)
@@ -36,25 +35,26 @@ end)
 -- -------------------------
 local Modules = {}
 
--- Fly Module (local)
+-- Fly Module (improved for smooth, TSB-like control)
 Modules.FlyModule = (function()
 	local M = {}
 	local active = false
 	local bg, bv
 	local speed = 80
+	local maxPitchAngle = math.rad(80) -- Limit pitch for smoother control
 
 	local function createControllers()
 		if bg then bg:Destroy() end
 		if bv then bv:Destroy() end
 		bg = Instance.new("BodyGyro")
-		bg.P = 9e4
+		bg.P = 1e5 -- Increased power for snappier response
 		bg.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
 		bg.CFrame = HRP.CFrame
 		bg.Parent = HRP
 
 		bv = Instance.new("BodyVelocity")
 		bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-		bv.Velocity = Vector3.new(0,0,0)
+		bv.Velocity = Vector3.new(0, 0, 0)
 		bv.Parent = HRP
 	end
 
@@ -74,22 +74,31 @@ Modules.FlyModule = (function()
 
 	function M.Update(dt)
 		if not active or not bg or not bv or not Camera then return end
-		-- keep gyro aligned with camera for smooth control
-		bg.CFrame = CFrame.new(HRP.Position, HRP.Position + Camera.CFrame.LookVector)
-		local move = Vector3.new(0,0,0)
-		if UIS:IsKeyDown(Enum.KeyCode.W) then move = move + (Camera.CFrame.LookVector) end
-		if UIS:IsKeyDown(Enum.KeyCode.S) then move = move - (Camera.CFrame.LookVector) end
-		if UIS:IsKeyDown(Enum.KeyCode.A) then move = move - (Camera.CFrame.RightVector) end
-		if UIS:IsKeyDown(Enum.KeyCode.D) then move = move + (Camera.CFrame.RightVector) end
-		if UIS:IsKeyDown(Enum.KeyCode.Space) then move = move + Vector3.new(0,1,0) end
-		if UIS:IsKeyDown(Enum.KeyCode.LeftShift) then move = move - Vector3.new(0,1,0) end
+		-- Align gyro with camera, limit pitch for smoother TSB-like control
+		local cameraCF = Camera.CFrame
+		local lookVector = cameraCF.LookVector
+		local flatLook = Vector3.new(lookVector.X, 0, lookVector.Z).Unit
+		local upVector = Vector3.new(0, 1, 0)
+		local rightVector = flatLook:Cross(upVector)
+		local pitchAngle = math.asin(lookVector.Y)
+		if math.abs(pitchAngle) > maxPitchAngle then
+			lookVector = (CFrame.new(Vector3.new(0, 0, 0), flatLook) * CFrame.Angles(math.sign(pitchAngle) * maxPitchAngle, 0, 0)).LookVector
+		end
+		bg.CFrame = CFrame.new(HRP.Position, HRP.Position + lookVector)
+
+		local move = Vector3.new(0, 0, 0)
+		if UIS:IsKeyDown(Enum.KeyCode.W) then move = move + Camera.CFrame.LookVector end
+		if UIS:IsKeyDown(Enum.KeyCode.S) then move = move - Camera.CFrame.LookVector end
+		if UIS:IsKeyDown(Enum.KeyCode.A) then move = move - Camera.CFrame.RightVector end
+		if UIS:IsKeyDown(Enum.KeyCode.D) then move = move + Camera.CFrame.RightVector end
+		if UIS:IsKeyDown(Enum.KeyCode.Space) then move = move + Vector3.new(0, 1, 0) end
+		if UIS:IsKeyDown(Enum.KeyCode.LeftShift) then move = move - Vector3.new(0, 1, 0) end
 
 		local vel = Vector3.zero
 		if move.Magnitude > 0.001 then
 			vel = move.Unit * speed
 		end
-		-- preserve small Y velocity from gravity when not pressing vertical keys? we intentionally set full velocity
-		bv.Velocity = Vector3.new(vel.X, vel.Y, vel.Z)
+		bv.Velocity = vel -- Smooth velocity application
 	end
 
 	function M.SetSpeed(v) speed = math.max(0, v or speed) end
@@ -116,7 +125,6 @@ Modules.NoclipModule = (function()
 		if not ch then return end
 		for _, part in ipairs(ch:GetDescendants()) do
 			if part:IsA("BasePart") then
-				-- we set CanCollide locally; servers may still enforce collisions server-side
 				pcall(function() part.CanCollide = not state end)
 			end
 		end
@@ -193,11 +201,10 @@ end)()
 -- Teleport Module (local)
 Modules.TeleportModule = (function()
 	local M = {}
-	function M.TeleportToXYZ(x,y,z)
+	function M.TeleportToXYZ(x, y, z)
 		if not x or not y or not z then return end
 		local char = player.Character
 		if char and char.PrimaryPart then
-			-- local-set; server may correct if anti-cheat exists
 			char:SetPrimaryPartCFrame(CFrame.new(x, y + 3, z))
 		elseif char and char:FindFirstChild("HumanoidRootPart") then
 			char.HumanoidRootPart.CFrame = CFrame.new(x, y + 3, z)
@@ -208,16 +215,16 @@ Modules.TeleportModule = (function()
 		if not pos then return end
 		local char = player.Character
 		if char and char.PrimaryPart then
-			char:SetPrimaryPartCFrame(CFrame.new(pos + Vector3.new(0,3,0)))
+			char:SetPrimaryPartCFrame(CFrame.new(pos + Vector3.new(0, 3, 0)))
 		elseif char and char:FindFirstChild("HumanoidRootPart") then
-			char.HumanoidRootPart.CFrame = CFrame.new(pos + Vector3.new(0,3,0))
+			char.HumanoidRootPart.CFrame = CFrame.new(pos + Vector3.new(0, 3, 0))
 		end
 	end
 
 	return M
 end)()
 
--- Hollow Purple (visual-only local cinematic + forward projectile)
+-- Hollow Purple (visual-only, enhanced for more TSB-like flair)
 Modules.HollowPurpleModule = (function()
 	local M = {}
 	local charging = false
@@ -225,28 +232,24 @@ Modules.HollowPurpleModule = (function()
 	local redOrb, blueOrb, mergedOrb, aura
 	local followConnection
 
-	-- local camera shake: additive pitch/yaw/roll small angles for duration
 	local function cameraShake(duration, magnitude)
 		local cam = workspace.CurrentCamera
 		if not cam then return end
 		local t0 = tick()
 		local conn
-		local original = cam.CFrame
 		conn = RunService.RenderStepped:Connect(function()
 			local now = tick()
 			local elapsed = now - t0
 			if elapsed > duration then
 				conn:Disconnect()
-				-- don't forcibly restore camera (other scripts may have modified it); do nothing
 				return
 			end
 			local damper = 1 - (elapsed / duration)
-			local x = (math.noise(now*18, 1) - 0.5) * 2 * magnitude * damper
-			local y = (math.noise(now*18, 2) - 0.5) * 2 * magnitude * damper
-			local z = (math.noise(now*18, 3) - 0.5) * 2 * magnitude * damper
+			local x = (math.noise(now * 20, 1) - 0.5) * 2 * magnitude * damper
+			local y = (math.noise(now * 20, 2) - 0.5) * 2 * magnitude * damper
+			local z = (math.noise(now * 20, 3) - 0.5) * 2 * magnitude * damper
 			local cf = cam.CFrame
-			-- apply small rotational jitter around camera center
-			cam.CFrame = CFrame.new(cf.Position) * CFrame.Angles(math.rad(x), math.rad(y), math.rad(z)) * CFrame.new(0,0,0)
+			cam.CFrame = CFrame.new(cf.Position) * CFrame.Angles(math.rad(x), math.rad(y), math.rad(z))
 		end)
 	end
 
@@ -261,7 +264,7 @@ Modules.HollowPurpleModule = (function()
 	local function spawnOrbPart(size, color, parent)
 		local p = Instance.new("Part")
 		p.Shape = Enum.PartType.Ball
-		p.Size = Vector3.new(size,size,size)
+		p.Size = Vector3.new(size, size, size)
 		p.CanCollide = false
 		p.Anchored = true
 		p.Material = Enum.Material.Neon
@@ -277,26 +280,33 @@ Modules.HollowPurpleModule = (function()
 		chargeStart = tick()
 		cleanupOrbs()
 
-		redOrb = spawnOrbPart(0.9, Color3.fromRGB(255,60,60))
-		blueOrb = spawnOrbPart(0.9, Color3.fromRGB(60,120,255))
-		aura = spawnOrbPart(1.6, Color3.fromRGB(200,80,255))
-		aura.Transparency = 0.75
+		redOrb = spawnOrbPart(1, Color3.fromRGB(255, 80, 80))
+		blueOrb = spawnOrbPart(1, Color3.fromRGB(80, 140, 255))
+		aura = spawnOrbPart(2, Color3.fromRGB(220, 100, 255))
+		aura.Transparency = 0.6
 
-		local start = tick()
+		local emitter = Instance.new("ParticleEmitter", aura)
+		emitter.Rate = 50
+		emitter.Lifetime = NumberRange.new(0.3, 0.8)
+		emitter.Speed = NumberRange.new(2, 5)
+		emitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.5), NumberSequenceKeypoint.new(1, 0)})
+		emitter.Color = ColorSequence.new(Color3.fromRGB(220, 100, 255))
+		emitter.Transparency = NumberSequence.new(0.4)
+
 		followConnection = RunService.RenderStepped:Connect(function()
 			if not charging then return end
 			local char = player.Character
 			if not char or not char:FindFirstChild("HumanoidRootPart") then return end
 			local hrp = char.HumanoidRootPart
-			local followCF = hrp.CFrame * CFrame.new(0, 0.6, -1.2)
-			local t = (tick() - start) * 2.2
-			local r = 1.2 + math.sin((tick()-start)*1.4) * 0.12
-			if redOrb then redOrb.CFrame = followCF * CFrame.new(math.cos(t)*r, math.sin(t*1.2)*0.2, math.sin(t)*r) end
-			if blueOrb then blueOrb.CFrame = followCF * CFrame.new(math.cos(t+math.pi)*r, math.sin((t+math.pi)*1.2)*0.2, math.sin(t+math.pi)*r) end
+			local followCF = hrp.CFrame * CFrame.new(0, 0.8, -1.5)
+			local t = (tick() - chargeStart) * 2.5
+			local r = 1.5 + math.sin((tick() - chargeStart) * 1.6) * 0.15
+			if redOrb then redOrb.CFrame = followCF * CFrame.new(math.cos(t) * r, math.sin(t * 1.3) * 0.3, math.sin(t) * r) end
+			if blueOrb then blueOrb.CFrame = followCF * CFrame.new(math.cos(t + math.pi) * r, math.sin((t + math.pi) * 1.3) * 0.3, math.sin(t + math.pi) * r) end
 			if aura then aura.CFrame = followCF end
 
-			local chargeDur = math.clamp((tick()-chargeStart)/1.3, 0, 1)
-			if aura then aura.Size = Vector3.new(1.6 + chargeDur*7, 1.6 + chargeDur*7, 1.6 + chargeDur*7) end
+			local chargeDur = math.clamp((tick() - chargeStart) / 1.2, 0, 1)
+			if aura then aura.Size = Vector3.new(2 + chargeDur * 8, 2 + chargeDur * 8, 2 + chargeDur * 8) end
 		end)
 	end
 
@@ -304,53 +314,40 @@ Modules.HollowPurpleModule = (function()
 		if not charging then return end
 		charging = false
 
-		-- capture origin
-		local originCF = HRP and (HRP.CFrame * CFrame.new(0, 0.6, -1.2)) or Camera.CFrame
+		local originCF = HRP and (HRP.CFrame * CFrame.new(0, 0.8, -1.5)) or Camera.CFrame
+		cleanupOrbs()
 
-		-- remove orbiters
-		if redOrb then redOrb:Destroy(); redOrb = nil end
-		if blueOrb then blueOrb:Destroy(); blueOrb = nil end
-		if aura then aura:Destroy(); aura = nil end
-		if followConnection then followConnection:Disconnect(); followConnection = nil end
-
-		-- spawn merged orb and aura
-		mergedOrb = spawnOrbPart(1.6, Color3.fromRGB(140,0,200))
+		mergedOrb = spawnOrbPart(2, Color3.fromRGB(160, 0, 220))
 		mergedOrb.CFrame = originCF
 		mergedOrb.Transparency = 0
 		mergedOrb.CanCollide = false
 
-		local mergedAura = spawnOrbPart(3.6, Color3.fromRGB(170,50,255))
-		mergedAura.Transparency = 0.7
+		local mergedAura = spawnOrbPart(4, Color3.fromRGB(180, 60, 255))
+		mergedAura.Transparency = 0.5
 		mergedAura.CFrame = originCF
 
-		-- grow tween
-		local buildTween = TweenService:Create(mergedOrb, TweenInfo.new(0.9, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = Vector3.new(5,5,5)})
-		local auraTween = TweenService:Create(mergedAura, TweenInfo.new(0.9, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = Vector3.new(12,12,12), Transparency = 0.6})
+		local buildTween = TweenService:Create(mergedOrb, TweenInfo.new(0.8, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = Vector3.new(6, 6, 6)})
+		local auraTween = TweenService:Create(mergedAura, TweenInfo.new(0.8, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = Vector3.new(14, 14, 14), Transparency = 0.4})
 		buildTween:Play(); auraTween:Play()
 
-		-- particle emitter
 		local emitter = Instance.new("ParticleEmitter", mergedOrb)
-		emitter.Rate = 80
-		emitter.Lifetime = NumberRange.new(0.2, 0.8)
-		emitter.Speed = NumberRange.new(0, 6)
-		emitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.6), NumberSequenceKeypoint.new(1, 0)})
-		emitter.Color = ColorSequence.new(Color3.fromRGB(200,120,255), Color3.fromRGB(140,0,200))
-		emitter.Transparency = NumberSequence.new(0.2)
+		emitter.Rate = 100
+		emitter.Lifetime = NumberRange.new(0.3, 1)
+		emitter.Speed = NumberRange.new(0, 8)
+		emitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.8), NumberSequenceKeypoint.new(1, 0)})
+		emitter.Color = ColorSequence.new(Color3.fromRGB(220, 140, 255), Color3.fromRGB(160, 0, 220))
+		emitter.Transparency = NumberSequence.new(0.3)
 
-		-- after short delay: launch forward visually
-		delay(1.05, function()
-			cameraShake(0.5, 1.2)
-
-			-- create BodyVelocity to move orb forward
+		delay(0.9, function()
+			cameraShake(0.6, 1.5)
 			local dir = Camera.CFrame.LookVector
-			local speed = 140
+			local speed = 160
 			local bv = Instance.new("BodyVelocity")
-			bv.MaxForce = Vector3.new(1e5,1e5,1e5)
+			bv.MaxForce = Vector3.new(1e5, 1e5, 1e5)
 			bv.Velocity = dir * speed
 			bv.Parent = mergedOrb
 			mergedOrb.Anchored = false
 
-			-- aura follow
 			local follow = RunService.RenderStepped:Connect(function()
 				if mergedOrb and mergedOrb.Parent then
 					mergedAura.CFrame = mergedOrb.CFrame
@@ -359,39 +356,34 @@ Modules.HollowPurpleModule = (function()
 				end
 			end)
 
-			-- schedule cleanup (pure visuals)
-			Debris:AddItem(mergedAura, 2.2)
-			Debris:AddItem(mergedOrb, 2.2)
+			Debris:AddItem(mergedAura, 2.5)
+			Debris:AddItem(mergedOrb, 2.5)
 
-			-- impact visual after travel
-			delay(1.1, function()
+			delay(1.2, function()
 				if mergedOrb and mergedOrb.Parent then
-					-- temporary burst particle
 					local burst = Instance.new("ParticleEmitter")
 					burst.Parent = mergedOrb
-					burst.Rate = 300
-					burst.Lifetime = NumberRange.new(0.3, 0.9)
-					burst.Speed = NumberRange.new(6, 28)
-					burst.Size = NumberSequence.new(1.6)
-					burst.Color = ColorSequence.new(Color3.fromRGB(240,160,255), Color3.fromRGB(140,0,200))
-					Debris:AddItem(burst, 0.6)
+					burst.Rate = 400
+					burst.Lifetime = NumberRange.new(0.4, 1)
+					burst.Speed = NumberRange.new(8, 30)
+					burst.Size = NumberSequence.new(2)
+					burst.Color = ColorSequence.new(Color3.fromRGB(255, 180, 255), Color3.fromRGB(160, 0, 220))
+					Debris:AddItem(burst, 0.7)
 
-					-- flash
 					local flash = Instance.new("Part")
 					flash.Anchored = true
 					flash.CanCollide = false
-					flash.Size = Vector3.new(8,8,8)
+					flash.Size = Vector3.new(10, 10, 10)
 					flash.Material = Enum.Material.Neon
-					flash.Color = Color3.fromRGB(255,200,255)
-					flash.Transparency = 0.75
+					flash.Color = Color3.fromRGB(255, 220, 255)
+					flash.Transparency = 0.6
 					flash.CFrame = mergedOrb.CFrame
 					flash.Parent = workspace
-					Debris:AddItem(flash, 0.35)
+					Debris:AddItem(flash, 0.4)
 				end
 			end)
 
-			-- final cleanup of bv and connection
-			delay(2.2, function()
+			delay(2.5, function()
 				if bv then bv:Destroy() end
 				if follow then follow:Disconnect() end
 			end)
@@ -404,60 +396,131 @@ Modules.HollowPurpleModule = (function()
 	return M
 end)()
 
+-- Infinity Module (visual-only barrier)
+Modules.InfinityModule = (function()
+	local M = {}
+	local active = false
+	local barrier, aura, emitter
+	local connection
+
+	local function cleanup()
+		if barrier then pcall(function() barrier:Destroy() end); barrier = nil end
+		if aura then pcall(function() aura:Destroy() end); aura = nil end
+		if emitter then pcall(function() emitter:Destroy() end); emitter = nil end
+		if connection then connection:Disconnect(); connection = nil end
+		active = false
+	end
+
+	function M.Toggle()
+		if not HRP then return false end
+		active = not active
+		if active then
+			cleanup()
+			barrier = Instance.new("Part")
+			barrier.Shape = Enum.PartType.Ball
+			barrier.Size = Vector3.new(8, 8, 8)
+			barrier.Material = Enum.Material.ForceField
+			barrier.Color = Color3.fromRGB(100, 150, 255)
+			barrier.Transparency = 0.4
+			barrier.CanCollide = false
+			barrier.Anchored = true
+			barrier.CastShadow = false
+			barrier.Parent = workspace
+
+			aura = Instance.new("Part")
+			aura.Shape = Enum.PartType.Ball
+			aura.Size = Vector3.new(8.5, 8.5, 8.5)
+			aura.Material = Enum.Material.Neon
+			aura.Color = Color3.fromRGB(120, 180, 255)
+			aura.Transparency = 0.7
+			aura.CanCollide = false
+			aura.Anchored = true
+			aura.CastShadow = false
+			aura.Parent = workspace
+
+			emitter = Instance.new("ParticleEmitter", aura)
+			emitter.Rate = 60
+			emitter.Lifetime = NumberRange.new(0.5, 1.2)
+			emitter.Speed = NumberRange.new(1, 3)
+			emitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.4), NumberSequenceKeypoint.new(1, 0)})
+			emitter.Color = ColorSequence.new(Color3.fromRGB(150, 200, 255))
+			emitter.Transparency = NumberSequence.new(0.5)
+
+			local t = 0
+			connection = RunService.RenderStepped:Connect(function(dt)
+				if not active or not HRP then cleanup(); return end
+				t = t + dt
+				local cf = HRP.CFrame
+				if barrier then
+					barrier.CFrame = cf
+					barrier.Transparency = 0.4 + math.sin(t * 2) * 0.1
+				end
+				if aura then
+					aura.CFrame = cf
+					aura.Size = Vector3.new(8.5 + math.sin(t * 1.5) * 0.3, 8.5 + math.sin(t * 1.5) * 0.3, 8.5 + math.sin(t * 1.5) * 0.3)
+				end
+			end)
+		else
+			cleanup()
+		end
+		return active
+	end
+
+	function M.IsActive() return active end
+	function M.Cleanup() cleanup() end
+
+	return M
+end)()
+
 -- -------------------------
 -- GUI (self-contained Rayfield-like)
 -- -------------------------
 local UI = {}
 do
-	-- root GUI
 	local screen = Instance.new("ScreenGui")
 	screen.Name = "AdminMenuGUI_ClientOnly"
 	screen.ResetOnSpawn = false
 	screen.Parent = player:WaitForChild("PlayerGui")
 
-	-- Main panel
 	local panel = Instance.new("Frame")
 	panel.Name = "RayfieldPanel"
-	panel.Size = UDim2.new(0, 380, 0, 340)
-	panel.Position = UDim2.new(0.5, -190, -1, 0) -- start off-screen above
-	panel.BackgroundColor3 = Color3.fromRGB(22,22,22)
+	panel.Size = UDim2.new(0, 380, 0, 360) -- Slightly taller for new button
+	panel.Position = UDim2.new(0.5, -190, -1, 0)
+	panel.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
 	panel.BorderSizePixel = 0
 	panel.Visible = false
 	panel.ClipsDescendants = true
 	panel.Parent = screen
 	local panelCorner = Instance.new("UICorner", panel); panelCorner.CornerRadius = UDim.new(0, 12)
 
-	-- Title
 	local title = Instance.new("Frame", panel)
 	title.Size = UDim2.new(1, 0, 0, 38)
 	title.Position = UDim2.new(0, 0, 0, 0)
-	title.BackgroundColor3 = Color3.fromRGB(18,18,18)
+	title.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
 	title.BorderSizePixel = 0
-	local titleCorner = Instance.new("UICorner", title); titleCorner.CornerRadius = UDim.new(0,12)
+	local titleCorner = Instance.new("UICorner", title); titleCorner.CornerRadius = UDim.new(0, 12)
 	local titleLabel = Instance.new("TextLabel", title)
 	titleLabel.Size = UDim2.new(1, -100, 1, 0)
 	titleLabel.Position = UDim2.new(0, 12, 0, 0)
 	titleLabel.BackgroundTransparency = 1
 	titleLabel.Font = Enum.Font.GothamBold
 	titleLabel.TextSize = 16
-	titleLabel.TextColor3 = Color3.fromRGB(240,240,240)
+	titleLabel.TextColor3 = Color3.fromRGB(240, 240, 240)
 	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
 	titleLabel.Text = "Control Panel (Client Only)"
 
-	-- Close button
 	local closeBtn = Instance.new("TextButton", title)
 	closeBtn.Size = UDim2.new(0, 70, 0, 26)
 	closeBtn.AnchorPoint = Vector2.new(1, 0.5)
 	closeBtn.Position = UDim2.new(1, -8, 0.5, 0)
-	closeBtn.BackgroundColor3 = Color3.fromRGB(165,35,35)
+	closeBtn.BackgroundColor3 = Color3.fromRGB(165, 35, 35)
 	closeBtn.Text = "Close"
 	closeBtn.Font = Enum.Font.Gotham
 	closeBtn.TextSize = 13
-	closeBtn.TextColor3 = Color3.new(1,1,1)
+	closeBtn.TextColor3 = Color3.new(1, 1, 1)
 	closeBtn.BorderSizePixel = 0
 	local closeCorner = Instance.new("UICorner", closeBtn); closeCorner.CornerRadius = UDim.new(0, 6)
 
-	-- Scrolling frame for content
 	local scrollFrame = Instance.new("ScrollingFrame", panel)
 	scrollFrame.Size = UDim2.new(1, -16, 1, -52)
 	scrollFrame.Position = UDim2.new(0, 8, 0, 44)
@@ -470,25 +533,22 @@ do
 	contentLayout.Padding = UDim.new(0, 8)
 	contentLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
-	-- Auto-resize canvas
 	contentLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
 		scrollFrame.CanvasSize = UDim2.new(0, 0, 0, contentLayout.AbsoluteContentSize.Y + 10)
 	end)
 
-	-- Resize handle
 	local resizeHandle = Instance.new("ImageButton", panel)
 	resizeHandle.Size = UDim2.new(0, 20, 0, 20)
 	resizeHandle.AnchorPoint = Vector2.new(1, 1)
 	resizeHandle.Position = UDim2.new(1, -4, 1, -4)
 	resizeHandle.BackgroundTransparency = 1
 	resizeHandle.Image = "rbxasset://textures/ui/ResizeIcon.png"
-	resizeHandle.ImageColor3 = Color3.fromRGB(150,150,150)
+	resizeHandle.ImageColor3 = Color3.fromRGB(150, 150, 150)
 
-	-- helpers
 	local function createCard(h)
 		local f = Instance.new("Frame")
 		f.Size = UDim2.new(1, -8, 0, h or 70)
-		f.BackgroundColor3 = Color3.fromRGB(34,34,34)
+		f.BackgroundColor3 = Color3.fromRGB(34, 34, 34)
 		f.BorderSizePixel = 0
 		local c = Instance.new("UICorner", f); c.CornerRadius = UDim.new(0, 8)
 		f.Parent = scrollFrame
@@ -499,11 +559,11 @@ do
 		local b = Instance.new("TextButton")
 		b.Size = UDim2.new(0.45, -6, 0, 32)
 		b.Position = UDim2.new(0, 8, 0, 8)
-		b.BackgroundColor3 = Color3.fromRGB(44,44,44)
+		b.BackgroundColor3 = Color3.fromRGB(44, 44, 44)
 		b.BorderSizePixel = 0
 		b.Font = Enum.Font.Gotham
 		b.TextSize = 13
-		b.TextColor3 = Color3.fromRGB(240,240,240)
+		b.TextColor3 = Color3.fromRGB(240, 240, 240)
 		b.Text = text
 		local cc = Instance.new("UICorner", b); cc.CornerRadius = UDim.new(0, 6)
 		b.Parent = parent
@@ -517,14 +577,13 @@ do
 		l.BackgroundTransparency = 1
 		l.Font = Enum.Font.Gotham
 		l.TextSize = 12
-		l.TextColor3 = Color3.fromRGB(210,210,210)
+		l.TextColor3 = Color3.fromRGB(210, 210, 210)
 		l.Text = text
 		l.TextWrapped = true
 		l.Parent = parent
 		return l
 	end
 
-	-- Build cards
 	-- Fly card
 	local flyCard = createCard(70)
 	local flyBtn = makeButton(flyCard, "Toggle Fly (B)")
@@ -553,20 +612,20 @@ do
 	speedLabel.BackgroundTransparency = 1
 	speedLabel.Font = Enum.Font.Gotham
 	speedLabel.TextSize = 12
-	speedLabel.TextColor3 = Color3.fromRGB(220,220,220)
+	speedLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
 	speedLabel.Text = "Speed: " .. tostring(Modules.SpeedModule.Get() or Humanoid.WalkSpeed)
 
 	local speedTrack = Instance.new("Frame", speedCard)
 	speedTrack.Size = UDim2.new(1, -16, 0, 8)
 	speedTrack.Position = UDim2.new(0, 8, 0, 38)
-	speedTrack.BackgroundColor3 = Color3.fromRGB(64,64,64)
-	local stCorner = Instance.new("UICorner", speedTrack); stCorner.CornerRadius = UDim.new(0,5)
+	speedTrack.BackgroundColor3 = Color3.fromRGB(64, 64, 64)
+	local stCorner = Instance.new("UICorner", speedTrack); stCorner.CornerRadius = UDim.new(0, 5)
 	local speedKnob = Instance.new("ImageButton", speedCard)
 	speedKnob.Size = UDim2.new(0, 14, 0, 14)
 	speedKnob.AnchorPoint = Vector2.new(0, 0.5)
 	local initSpeed = Modules.SpeedModule.Get() or Humanoid.WalkSpeed
 	local minSpeed, maxSpeed = 10, 500
-	local speedNorm = (initSpeed - minSpeed)/(maxSpeed - minSpeed)
+	local speedNorm = (initSpeed - minSpeed) / (maxSpeed - minSpeed)
 	speedKnob.Position = UDim2.new(math.clamp(speedNorm, 0, 1), -7, 0, 45)
 	speedKnob.Image = "rbxassetid://3570695787"
 	speedKnob.BackgroundTransparency = 1
@@ -579,21 +638,21 @@ do
 	jumpLabel.BackgroundTransparency = 1
 	jumpLabel.Font = Enum.Font.Gotham
 	jumpLabel.TextSize = 12
-	jumpLabel.TextColor3 = Color3.fromRGB(220,220,220)
+	jumpLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
 	jumpLabel.Text = "Jump: " .. tostring(Modules.JumpModule.Get() or Humanoid.JumpPower)
 
 	local jumpTrack = Instance.new("Frame", jumpCard)
 	jumpTrack.Size = UDim2.new(1, -16, 0, 8)
 	jumpTrack.Position = UDim2.new(0, 8, 0, 38)
-	jumpTrack.BackgroundColor3 = Color3.fromRGB(64,64,64)
-	local jtCorner = Instance.new("UICorner", jumpTrack); jtCorner.CornerRadius = UDim.new(0,5)
+	jumpTrack.BackgroundColor3 = Color3.fromRGB(64, 64, 64)
+	local jtCorner = Instance.new("UICorner", jumpTrack); jtCorner.CornerRadius = UDim.new(0, 5)
 	local jumpKnob = Instance.new("ImageButton", jumpCard)
 	jumpKnob.Size = UDim2.new(0, 14, 0, 14)
 	jumpKnob.AnchorPoint = Vector2.new(0, 0.5)
 	local initJump = Modules.JumpModule.Get() or Humanoid.JumpPower
 	local minJump, maxJump = 10, 500
-	local jumpNorm = (initJump - minJump)/(maxJump - minJump)
-	jumpKnob.Position = UDim2.new(math.clamp(jumpNorm,0,1), -7, 0, 45)
+	local jumpNorm = (initJump - minJump) / (maxJump - minJump)
+	jumpKnob.Position = UDim2.new(math.clamp(jumpNorm, 0, 1), -7, 0, 45)
 	jumpKnob.Image = "rbxassetid://3570695787"
 	jumpKnob.BackgroundTransparency = 1
 
@@ -604,8 +663,8 @@ do
 	tpX.Position = UDim2.new(0, 8, 0, 8)
 	tpX.PlaceholderText = "X"
 	tpX.ClearTextOnFocus = false
-	tpX.BackgroundColor3 = Color3.fromRGB(36,36,36)
-	tpX.TextColor3 = Color3.fromRGB(245,245,245)
+	tpX.BackgroundColor3 = Color3.fromRGB(36, 36, 36)
+	tpX.TextColor3 = Color3.fromRGB(245, 245, 245)
 	tpX.Font = Enum.Font.Gotham
 	tpX.TextSize = 13
 
@@ -617,18 +676,18 @@ do
 	tpBtn.Position = UDim2.new(0, 8, 0, 44)
 	tpBtn.Text = "Teleport (Local)"
 	tpBtn.Font = Enum.Font.Gotham
-	tpBtn.TextColor3 = Color3.fromRGB(240,240,240)
+	tpBtn.TextColor3 = Color3.fromRGB(240, 240, 240)
 	tpBtn.TextSize = 13
-	tpBtn.BackgroundColor3 = Color3.fromRGB(40,40,40)
+	tpBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 	tpBtn.BorderSizePixel = 0
-	local tpCorner = Instance.new("UICorner", tpBtn); tpCorner.CornerRadius = UDim.new(0,6)
+	local tpCorner = Instance.new("UICorner", tpBtn); tpCorner.CornerRadius = UDim.new(0, 6)
 
 	tpBtn.MouseButton1Click:Connect(function()
 		local x = tonumber(tpX.Text)
 		local y = tonumber(tpY.Text)
 		local z = tonumber(tpZ.Text)
 		if x and y and z then
-			Modules.TeleportModule.TeleportToXYZ(x,y,z)
+			Modules.TeleportModule.TeleportToXYZ(x, y, z)
 		end
 	end)
 
@@ -648,10 +707,8 @@ do
 	hollowBtn.Size = UDim2.new(0.45, -6, 0, 32)
 	local hollowLabel = makeLabel(hollowCard, "Charge with Z, release to fire (visual only)")
 	hollowBtn.MouseButton1Click:Connect(function()
-		-- manual click-triggered visual as well
 		if not Modules.HollowPurpleModule.IsCharging() then
 			Modules.HollowPurpleModule.StartCharge()
-			-- auto release after short hold so click triggers a shot
 			delay(1.2, function()
 				if Modules.HollowPurpleModule.IsCharging() then
 					Modules.HollowPurpleModule.Release()
@@ -660,7 +717,16 @@ do
 		end
 	end)
 
-	-- Window dragging (title)
+	-- Infinity card
+	local infinityCard = createCard(70)
+	local infinityBtn = makeButton(infinityCard, "Toggle Infinity (X)")
+	local infinityLabel = makeLabel(infinityCard, "Visual barrier effect (client-side only)")
+	infinityBtn.MouseButton1Click:Connect(function()
+		local active = Modules.InfinityModule.Toggle()
+		infinityBtn.Text = active and "Infinity: ON (X)" or "Toggle Infinity (X)"
+	end)
+
+	-- Window dragging
 	local dragging = false
 	local dragStart = nil
 	local startPos = nil
@@ -670,7 +736,6 @@ do
 			dragging = true
 			dragStart = input.Position
 			startPos = panel.Position
-
 			input.Changed:Connect(function()
 				if input.UserInputState == Enum.UserInputState.End then
 					dragging = false
@@ -682,12 +747,7 @@ do
 	UIS.InputChanged:Connect(function(input)
 		if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
 			local delta = input.Position - dragStart
-			panel.Position = UDim2.new(
-				startPos.X.Scale,
-				startPos.X.Offset + delta.X,
-				startPos.Y.Scale,
-				startPos.Y.Offset + delta.Y
-			)
+			panel.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
 		end
 	end)
 
@@ -701,7 +761,6 @@ do
 			resizing = true
 			resizeStart = input.Position
 			startSize = panel.Size
-
 			input.Changed:Connect(function()
 				if input.UserInputState == Enum.UserInputState.End then
 					resizing = false
@@ -719,7 +778,7 @@ do
 		end
 	end)
 
-	-- Close button behavior (slide out)
+	-- Close button
 	closeBtn.MouseButton1Click:Connect(function()
 		local closeTween = TweenService:Create(panel, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
 			Position = UDim2.new(panel.Position.X.Scale, panel.Position.X.Offset, -1, 0)
@@ -730,16 +789,16 @@ do
 		end)
 	end)
 
-	-- Toggle button (on-screen)
+	-- Toggle button
 	local toggleButton = Instance.new("TextButton")
 	toggleButton.Name = "MenuToggle"
 	toggleButton.Size = UDim2.new(0, 120, 0, 34)
 	toggleButton.Position = UDim2.new(0.5, -60, 0.03, 0)
-	toggleButton.BackgroundColor3 = Color3.fromRGB(28,28,28)
+	toggleButton.BackgroundColor3 = Color3.fromRGB(28, 28, 28)
 	toggleButton.Text = "Menu"
 	toggleButton.Font = Enum.Font.GothamBold
 	toggleButton.TextSize = 15
-	toggleButton.TextColor3 = Color3.new(1,1,1)
+	toggleButton.TextColor3 = Color3.new(1, 1, 1)
 	local toggleCorner = Instance.new("UICorner", toggleButton); toggleCorner.CornerRadius = UDim.new(0, 10)
 	toggleButton.Parent = screen
 
@@ -753,7 +812,6 @@ do
 			toggleDragging = true
 			toggleDragStart = input.Position
 			toggleStartPos = toggleButton.Position
-
 			input.Changed:Connect(function()
 				if input.UserInputState == Enum.UserInputState.End then
 					toggleDragging = false
@@ -765,12 +823,7 @@ do
 	UIS.InputChanged:Connect(function(input)
 		if toggleDragging and input.UserInputType == Enum.UserInputType.MouseMovement then
 			local delta = input.Position - toggleDragStart
-			toggleButton.Position = UDim2.new(
-				toggleStartPos.X.Scale,
-				toggleStartPos.X.Offset + delta.X,
-				toggleStartPos.Y.Scale,
-				toggleStartPos.Y.Offset + delta.Y
-			)
+			toggleButton.Position = UDim2.new(toggleStartPos.X.Scale, toggleStartPos.X.Offset + delta.X, toggleStartPos.Y.Scale, toggleStartPos.Y.Offset + delta.Y)
 		end
 	end)
 
@@ -792,7 +845,7 @@ do
 		end
 	end)
 
-	-- clicking outside closes panel
+	-- Click outside to close
 	UIS.InputBegan:Connect(function(input, processed)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 and panel.Visible then
 			local mpos = UIS:GetMouseLocation()
@@ -810,7 +863,6 @@ do
 		end
 	end)
 
-	-- Expose relevant UI elements and state
 	UI.Panel = panel
 	UI.ToggleButton = toggleButton
 	UI.SpeedKnob = speedKnob
@@ -834,7 +886,6 @@ end
 -- Interaction & Knob logic
 -- -------------------------
 do
-	-- Speed knob dragging
 	local draggingSpeed = false
 	local minSpeed, maxSpeed = 10, 1000
 	local speedTrack = UI.SpeedTrack
@@ -865,7 +916,6 @@ do
 		end
 	end)
 
-	-- Jump knob dragging
 	local draggingJump = false
 	local jumpTrack = UI.JumpTrack
 	local jumpKnob = UI.JumpKnob
@@ -880,6 +930,7 @@ do
 			end)
 		end
 	end)
+
 	UIS.InputChanged:Connect(function(input)
 		if draggingJump and input.UserInputType == Enum.UserInputType.MouseMovement then
 			local absX = jumpTrack.AbsolutePosition.X
@@ -895,7 +946,7 @@ do
 	end)
 end
 
--- Click TP behavior (UI.ClickTPEnabled)
+-- Click TP behavior
 player:GetMouse().Button1Down:Connect(function()
 	local mouse = player:GetMouse()
 	if UI.ClickTPEnabled() and UI.PanelVisible() and not Modules.HollowPurpleModule.IsCharging() then
@@ -905,7 +956,7 @@ player:GetMouse().Button1Down:Connect(function()
 	end
 end)
 
--- Keybind: Z for Hollow Purple (press = charge, release = launch). B for fly toggle.
+-- Keybinds: Z for Hollow Purple, B for Fly, X for Infinity, Q for Dash
 do
 	UIS.InputBegan:Connect(function(input, processed)
 		if processed then return end
@@ -915,10 +966,10 @@ do
 			end
 		elseif input.KeyCode == Enum.KeyCode.B then
 			local active = Modules.FlyModule.Toggle()
-			-- toggle button text update (if present)
-			pcall(function()
-				local btn = UI and UI.ToggleButton -- not the fly button; update nothing here
-			end)
+		elseif input.KeyCode == Enum.KeyCode.X then
+			local active = Modules.InfinityModule.Toggle()
+		elseif input.KeyCode == Enum.KeyCode.Q then
+			_G.PerformDash(100) -- Dash with default distance
 		end
 	end)
 
@@ -931,12 +982,12 @@ do
 	end)
 end
 
--- Ensure modules update per-frame where needed
+-- Update loop for modules
 RunService.RenderStepped:Connect(function(dt)
 	Modules.FlyModule.Update(dt)
 end)
 
--- Character respawn handling: re-init modules and UI defaults
+-- Character respawn handling
 player.CharacterAdded:Connect(function(chr)
 	Character = chr
 	Humanoid = Character:WaitForChild("Humanoid")
@@ -947,13 +998,15 @@ player.CharacterAdded:Connect(function(chr)
 	Modules.SpeedModule.Init(Humanoid)
 	Modules.JumpModule.Init(Humanoid)
 	Modules.HollowPurpleModule.Cleanup()
+	Modules.InfinityModule.Cleanup()
 end)
+
+-- Coordinates UI
 local CoordsUI = Instance.new("ScreenGui")
 CoordsUI.Name = "CoordsUI"
 CoordsUI.ResetOnSpawn = false
 CoordsUI.Parent = player:WaitForChild("PlayerGui")
 
--- Create Background Frame
 local frame = Instance.new("Frame")
 frame.Size = UDim2.new(0, 220, 0, 60)
 frame.Position = UDim2.new(1, -230, 1, -70)
@@ -962,7 +1015,6 @@ frame.BackgroundTransparency = 0.25
 frame.BorderSizePixel = 0
 frame.Parent = CoordsUI
 
--- Add Corner and Shadow
 local corner = Instance.new("UICorner", frame)
 corner.CornerRadius = UDim.new(0, 10)
 
@@ -971,7 +1023,6 @@ stroke.Thickness = 1
 stroke.Color = Color3.fromRGB(90, 90, 90)
 stroke.Transparency = 0.3
 
--- Create TextLabel
 local coordLabel = Instance.new("TextLabel")
 coordLabel.Size = UDim2.new(1, -10, 1, -10)
 coordLabel.Position = UDim2.new(0, 5, 0, 5)
@@ -985,7 +1036,6 @@ coordLabel.TextXAlignment = Enum.TextXAlignment.Left
 coordLabel.TextYAlignment = Enum.TextYAlignment.Top
 coordLabel.Parent = frame
 
--- Update loop
 RunService.RenderStepped:Connect(function()
 	local character = player.Character
 	if character and character:FindFirstChild("HumanoidRootPart") then
@@ -993,184 +1043,146 @@ RunService.RenderStepped:Connect(function()
 		coordLabel.Text = string.format("X: %.1f\nY: %.1f\nZ: %.1f", pos.X, pos.Y, pos.Z)
 	end
 end)
-local camera = workspace.CurrentCamera
 
--- No RemoteEvent needed since we're making it client-side
--- Removed: local folder = ReplicatedStorage:WaitForChild("AdminRemoteFolder")
--- Removed: local AdminEvent = folder:WaitForChild("AdminEvent")
-
--- local state
+-- Dash (TSB-like)
 local lastLocalDashRequest = 0
-local LOCAL_REQUEST_COOLDOWN = 0.25 -- rate-limit client requests a bit
-local DASH_DISTANCE = 100 -- studs (increased significantly for TSB-like long-range dash feel)
+local LOCAL_REQUEST_COOLDOWN = 0.2 -- Tighter cooldown for snappy TSB feel
+local DASH_DISTANCE = 100 -- Matches TSB's long-range dash
 
--- ---------- Utility visual effects ----------
 local function cameraShake(duration, magnitude)
-    local cam = workspace.CurrentCamera
-    if not cam then return end
-    local t0 = tick()
-    local conn
-    conn = RunService.RenderStepped:Connect(function()
-        local now = tick()
-        local elapsed = now - t0
-        if elapsed > duration then
-            conn:Disconnect()
-            return
-        end
-        local damper = 1 - (elapsed / duration)
-        local x = (math.noise(now*20, 1) - 0.5) * 2 * magnitude * damper
-        local y = (math.noise(now*20, 2) - 0.5) * 2 * magnitude * damper
-        local z = (math.noise(now*20, 3) - 0.5) * 2 * magnitude * damper
-        local cf = cam.CFrame
-        cam.CFrame = CFrame.new(cf.Position) * CFrame.Angles(math.rad(x), math.rad(y), math.rad(z))
-    end)
+	local cam = workspace.CurrentCamera
+	if not cam then return end
+	local t0 = tick()
+	local conn
+	conn = RunService.RenderStepped:Connect(function()
+		local now = tick()
+		local elapsed = now - t0
+		if elapsed > duration then
+			conn:Disconnect()
+			return
+		end
+		local damper = 1 - (elapsed / duration)
+		local x = (math.noise(now * 22, 1) - 0.5) * 2 * magnitude * damper
+		local y = (math.noise(now * 22, 2) - 0.5) * 2 * magnitude * damper
+		local z = (math.noise(now * 22, 3) - 0.5) * 2 * magnitude * damper
+		local cf = cam.CFrame
+		cam.CFrame = CFrame.new(cf.Position) * CFrame.Angles(math.rad(x), math.rad(y), math.rad(z))
+	end)
 end
 
 local function spawnLightningBetween(a, b, color)
-    -- create a visual lightning made of thin neon parts between a and b, more segments for TSB-like dense effect
-    local dir = (b - a)
-    local len = dir.Magnitude
-    if len <= 0 then return end
-    local segments = math.clamp(math.floor(len / 2), 5, 50) -- even more segments for denser, chaotic TSB lightning
-    local parent = Instance.new("Folder")
-    parent.Name = "DashLightning"
-    parent.Parent = workspace
+	local dir = (b - a)
+	local len = dir.Magnitude
+	if len <= 0 then return end
+	local segments = math.clamp(math.floor(len / 1.5), 8, 60) -- More segments for TSB chaos
+	local parent = Instance.new("Folder")
+	parent.Name = "DashLightning"
+	parent.Parent = workspace
 
-    local prev = a
-    for i = 1, segments do
-        local t = i / segments
-        local point = a + dir * t
-        -- increased jitter for more electric, TSB-style chaos
-        local jitter = Vector3.new((math.random()-0.5)*3, (math.random()-0.5)*3, (math.random()-0.5)*3)
-        local segPos = point + jitter * (1 - math.abs(0.5 - t)) * 1.2
+	local prev = a
+	for i = 1, segments do
+		local t = i / segments
+		local point = a + dir * t
+		local jitter = Vector3.new((math.random() - 0.5) * 4, (math.random() - 0.5) * 4, (math.random() - 0.5) * 4)
+		local segPos = point + jitter * (1 - math.abs(0.5 - t)) * 1.5
 
-        local part = Instance.new("Part")
-        part.Anchored = true
-        part.CanCollide = false
-        part.Material = Enum.Material.Neon
-        part.Size = Vector3.new(0.1, 0.1, (segPos - prev).Magnitude) -- thinner for TSB style
-        part.CFrame = CFrame.new((segPos + prev) / 2, segPos) * CFrame.Angles(math.pi/2, 0, 0)
-        part.Color = color or Color3.fromRGB(170, 60, 255)
-        part.Parent = parent
-        prev = segPos
-        Debris:AddItem(part, 0.6) -- slightly longer lifetime for visibility over longer distance
-    end
-    Debris:AddItem(parent, 0.7)
+		local part = Instance.new("Part")
+		part.Anchored = true
+		part.CanCollide = false
+		part.Material = Enum.Material.Neon
+		part.Size = Vector3.new(0.08, 0.08, (segPos - prev).Magnitude)
+		part.CFrame = CFrame.new((segPos + prev) / 2, segPos) * CFrame.Angles(math.pi / 2, 0, 0)
+		part.Color = color or Color3.fromRGB(180, 80, 255)
+		part.Parent = parent
+		prev = segPos
+		Debris:AddItem(part, 0.5)
+	end
+	Debris:AddItem(parent, 0.6)
 end
 
 local function spawnDashTrail(originCF)
-    -- enhanced purple trail effect at originCFrame, with more particles for TSB flair
-    local orb = Instance.new("Part")
-    orb.Shape = Enum.PartType.Ball
-    orb.Size = Vector3.new(3,3,3) -- larger for TSB impact
-    orb.Material = Enum.Material.Neon
-    orb.Color = Color3.fromRGB(160, 70, 255)
-    orb.Anchored = true
-    orb.CanCollide = false
-    orb.CFrame = originCF
-    orb.Parent = workspace
-    Debris:AddItem(orb, 1)
-    -- grow and fade
-    local tween = TweenService:Create(orb, TweenInfo.new(0.8, Enum.EasingStyle.Quad), {Size = Vector3.new(6,6,6), Transparency = 1})
-    tween:Play()
+	local orb = Instance.new("Part")
+	orb.Shape = Enum.PartType.Ball
+	orb.Size = Vector3.new(4, 4, 4)
+	orb.Material = Enum.Material.Neon
+	orb.Color = Color3.fromRGB(180, 80, 255)
+	orb.Anchored = true
+	orb.CanCollide = false
+	orb.CFrame = originCF
+	orb.Parent = workspace
+	Debris:AddItem(orb, 0.8)
+	local tween = TweenService:Create(orb, TweenInfo.new(0.6, Enum.EasingStyle.Quad), {Size = Vector3.new(8, 8, 8), Transparency = 1})
+	tween:Play()
 
-    -- Add enhanced particle effect for extra TSB-like trail
-    local emitter = Instance.new("ParticleEmitter")
-    emitter.Texture = "rbxassetid://241685484" -- simple spark texture
-    emitter.Size = NumberSequence.new(0.8, 0)
-    emitter.Lifetime = NumberRange.new(0.7, 1.2)
-    emitter.Rate = 150
-    emitter.Speed = NumberRange.new(8, 20)
-    emitter.Color = ColorSequence.new(Color3.fromRGB(170, 60, 255))
-    emitter.Parent = orb
-    task.delay(0.2, function() emitter.Enabled = false end)
+	local emitter = Instance.new("ParticleEmitter")
+	emitter.Texture = "rbxassetid://243098098"
+	emitter.Size = NumberSequence.new(1, 0)
+	emitter.Lifetime = NumberRange.new(0.5, 1)
+	emitter.Rate = 200
+	emitter.Speed = NumberRange.new(10, 25)
+	emitter.Color = ColorSequence.new(Color3.fromRGB(180, 80, 255))
+	emitter.Parent = orb
+	task.delay(0.15, function() emitter.Enabled = false end)
 end
 
 local function playDashSound()
-    -- Play a zap/whoosh sound like in TSB
-    local sound = Instance.new("Sound")
-    sound.SoundId = "rbxassetid://142929386" -- Example zap sound; replace with actual TSB-like sound ID if available
-    sound.Volume = 1
-    sound.Parent = workspace
-    sound:Play()
-    Debris:AddItem(sound, 1.5)
+	local sound = Instance.new("Sound")
+	sound.SoundId = "rbxassetid://911853195" -- TSB-like whoosh sound
+	sound.Volume = 1.2
+	sound.Parent = workspace
+	sound:Play()
+	Debris:AddItem(sound, 1.2)
 end
 
--- ---------- Perform dash locally ----------
 local function performDash(distance)
-    -- rate-limit local spam
-    if tick() - lastLocalDashRequest < LOCAL_REQUEST_COOLDOWN then return end
-    lastLocalDashRequest = tick()
+	if tick() - lastLocalDashRequest < LOCAL_REQUEST_COOLDOWN then return end
+	lastLocalDashRequest = tick()
 
-    local player = game.Players.LocalPlayer
-    local char = player.Character
-    if not char then return end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-    local hum = char:FindFirstChild("Humanoid")
-    if not hum then return end
+	local char = player.Character
+	if not char then return end
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
+	local hum = char:FindFirstChild("Humanoid")
+	if not hum then return end
 
-    -- Calculate target position: forward from camera look vector
-    local cam = workspace.CurrentCamera
-    if not cam then return end
-    local lookDir = cam.CFrame.LookVector
-    local origin = hrp.Position
-    local target = origin + lookDir * distance
+	local cam = workspace.CurrentCamera
+	if not cam then return end
+	local lookDir = cam.CFrame.LookVector
+	local origin = hrp.Position
+	local target = origin + lookDir * distance
 
-    -- Perform the dash: teleport instantly (like TSB)
-    hrp.CFrame = CFrame.new(target) * (hrp.CFrame - hrp.CFrame.Position)  -- Preserve rotation
+	-- Raycast to prevent dashing through walls
+	local ray = Ray.new(origin, lookDir * distance)
+	local hit, pos = workspace:FindPartOnRayWithIgnoreList(ray, {char})
+	if hit then
+		target = pos
+	end
 
-    -- Play effects
-    -- stronger camera shake for TSB feel
-    cameraShake(0.5, 3)
+	hrp.CFrame = CFrame.new(target) * (hrp.CFrame - hrp.CFrame.Position)
+	cameraShake(0.4, 2.5)
+	spawnLightningBetween(origin, target, Color3.fromRGB(180, 80, 255))
+	spawnDashTrail(CFrame.new(target))
+	playDashSound()
 
-    -- lightning bolt from origin to target
-    spawnLightningBetween(origin, target, Color3.fromRGB(165, 60, 255))
-
-    -- purple trail at the landed spot
-    local cf = CFrame.new(target)
-    spawnDashTrail(cf)
-
-    -- play sound
-    playDashSound()
-
-    -- more intense screen flash (using a ScreenGui)
-    local gui = Instance.new("ScreenGui")
-    gui.ResetOnSpawn = false
-    gui.Name = "DashFlash"
-    gui.Parent = player:WaitForChild("PlayerGui")
-    local rect = Instance.new("Frame", gui)
-    rect.AnchorPoint = Vector2.new(0.5,0.5)
-    rect.Size = UDim2.new(2,0,2,0)
-    rect.Position = UDim2.new(0.5,0,0.5,0)
-    rect.BackgroundColor3 = Color3.fromRGB(200, 120, 255)
-    rect.BackgroundTransparency = 0.8 -- more opaque for stronger TSB flash
-    rect.ZIndex = 99999
-    Debris:AddItem(gui, 0.5)
-    -- flash tween
-    TweenService:Create(rect, TweenInfo.new(0.4, Enum.EasingStyle.Quad), {BackgroundTransparency = 1}):Play()
+	local gui = Instance.new("ScreenGui")
+	gui.ResetOnSpawn = false
+	gui.Name = "DashFlash"
+	gui.Parent = player:WaitForChild("PlayerGui")
+	local rect = Instance.new("Frame", gui)
+	rect.AnchorPoint = Vector2.new(0.5, 0.5)
+	rect.Size = UDim2.new(2, 0, 2, 0)
+	rect.Position = UDim2.new(0.5, 0, 0.5, 0)
+	rect.BackgroundColor3 = Color3.fromRGB(220, 140, 255)
+	rect.BackgroundTransparency = 0.7
+	rect.ZIndex = 99999
+	Debris:AddItem(gui, 0.4)
+	TweenService:Create(rect, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {BackgroundTransparency = 1}):Play()
 end
 
--- ---------- Integrate with your existing client modules ----------
--- Keybind Q triggers dash with default distance (changed from E to Q).
-
-UIS.InputBegan:Connect(function(input, processed)
-    if processed then return end
-    if input.UserInputType == Enum.UserInputType.Keyboard then
-        if input.KeyCode == Enum.KeyCode.Q then  -- Changed to Q
-            -- Perform dash directly
-            performDash(DASH_DISTANCE)
-        end
-    end
-end)
-
--- Optional: expose performDash to global so other client code (GUI buttons) can call it:
 _G.PerformDash = performDash
 
-print("[AdminClient] Dash loaded — press Q to dash.")
-
--- Initial module init values
+-- Initial module init
 Modules.SpeedModule.Init(Humanoid)
 Modules.JumpModule.Init(Humanoid)
--- Final note
-print("[ClientAdmin] Loaded: Client-only admin GUI (visuals & local movement). Hollow Purple is visual-only and launches forward.")
+
+print("[ClientAdmin] Loaded: Client-only admin GUI (visuals & local movement). Hollow Purple and Infinity are visual-only. Press Q to dash, X for Infinity.")
