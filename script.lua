@@ -37,31 +37,25 @@ end)
 local Modules = {}
 
 -- Fly Module (local)
--- Fly Module (modern physics, local-only)
 Modules.FlyModule = (function()
 	local M = {}
 	local active = false
-	local align, force
+	local bg, bv
 	local speed = 80
 
 	local function createControllers()
-		if align then align:Destroy() end
-		if force then force:Destroy() end
+		if bg then bg:Destroy() end
+		if bv then bv:Destroy() end
+		bg = Instance.new("BodyGyro")
+		bg.P = 9e4
+		bg.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+		bg.CFrame = HRP.CFrame
+		bg.Parent = HRP
 
-		align = Instance.new("AlignOrientation")
-		align.Mode = Enum.OrientationAlignmentMode.OneAttachment
-		align.MaxAngularVelocity = math.huge
-		align.MaxTorque = math.huge
-		align.Responsiveness = 200
-		align.Attachment0 = Instance.new("Attachment", HRP)
-		align.Parent = HRP
-
-		force = Instance.new("VectorForce")
-		force.Force = Vector3.zero
-		force.ApplyAtCenterOfMass = true
-		force.Attachment0 = align.Attachment0
-		force.RelativeTo = Enum.ActuatorRelativeTo.World
-		force.Parent = HRP
+		bv = Instance.new("BodyVelocity")
+		bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+		bv.Velocity = Vector3.new(0,0,0)
+		bv.Parent = HRP
 	end
 
 	function M.Toggle()
@@ -71,51 +65,45 @@ Modules.FlyModule = (function()
 			createControllers()
 			Humanoid.PlatformStand = true
 		else
-			if align then align:Destroy(); align = nil end
-			if force then force:Destroy(); force = nil end
+			if bg then bg:Destroy(); bg = nil end
+			if bv then bv:Destroy(); bv = nil end
 			Humanoid.PlatformStand = false
 		end
 		return active
 	end
 
 	function M.Update(dt)
-		if not active or not align or not force or not Camera then return end
+		if not active or not bg or not bv or not Camera then return end
+		-- keep gyro aligned with camera for smooth control
+		bg.CFrame = CFrame.new(HRP.Position, HRP.Position + Camera.CFrame.LookVector)
+		local move = Vector3.new(0,0,0)
+		if UIS:IsKeyDown(Enum.KeyCode.W) then move = move + (Camera.CFrame.LookVector) end
+		if UIS:IsKeyDown(Enum.KeyCode.S) then move = move - (Camera.CFrame.LookVector) end
+		if UIS:IsKeyDown(Enum.KeyCode.A) then move = move - (Camera.CFrame.RightVector) end
+		if UIS:IsKeyDown(Enum.KeyCode.D) then move = move + (Camera.CFrame.RightVector) end
+		if UIS:IsKeyDown(Enum.KeyCode.Space) then move = move + Vector3.new(0,1,0) end
+		if UIS:IsKeyDown(Enum.KeyCode.LeftShift) then move = move - Vector3.new(0,1,0) end
 
-		-- Align player to camera direction
-		align.CFrame = CFrame.lookAt(HRP.Position, HRP.Position + Camera.CFrame.LookVector)
-
-		-- Movement vector
-		local move = Vector3.zero
-		if UIS:IsKeyDown(Enum.KeyCode.W) then move += Camera.CFrame.LookVector end
-		if UIS:IsKeyDown(Enum.KeyCode.S) then move -= Camera.CFrame.LookVector end
-		if UIS:IsKeyDown(Enum.KeyCode.A) then move -= Camera.CFrame.RightVector end
-		if UIS:IsKeyDown(Enum.KeyCode.D) then move += Camera.CFrame.RightVector end
-		if UIS:IsKeyDown(Enum.KeyCode.Space) then move += Vector3.yAxis end
-		if UIS:IsKeyDown(Enum.KeyCode.LeftShift) then move -= Vector3.yAxis end
-
-		if move.Magnitude > 0 then
-			force.Force = move.Unit * speed * 100 -- scaled by mass later
-		else
-			force.Force = Vector3.zero
+		local vel = Vector3.zero
+		if move.Magnitude > 0.001 then
+			vel = move.Unit * speed
 		end
+		-- preserve small Y velocity from gravity when not pressing vertical keys? we intentionally set full velocity
+		bv.Velocity = Vector3.new(vel.X, vel.Y, vel.Z)
 	end
 
-	function M.SetSpeed(v)
-		speed = math.max(0, v or speed)
-	end
-
+	function M.SetSpeed(v) speed = math.max(0, v or speed) end
 	function M.IsActive() return active end
 
 	function M.Cleanup()
-		if align then align:Destroy() end
-		if force then force:Destroy() end
+		if bg then bg:Destroy(); bg = nil end
+		if bv then bv:Destroy(); bv = nil end
 		active = false
 		if Humanoid then Humanoid.PlatformStand = false end
 	end
 
 	return M
 end)()
-
 
 -- Noclip Module (local-only)
 Modules.NoclipModule = (function()
@@ -557,7 +545,7 @@ do
 		noclipBtn.Text = active and "No-Clip: ON" or "Toggle No-Clip"
 	end)
 
-		-- Speed card (textbox)
+	-- Speed card (slider)
 	local speedCard = createCard(90)
 	local speedLabel = Instance.new("TextLabel", speedCard)
 	speedLabel.Size = UDim2.new(1, -16, 0, 18)
@@ -567,31 +555,21 @@ do
 	speedLabel.TextSize = 12
 	speedLabel.TextColor3 = Color3.fromRGB(220,220,220)
 	speedLabel.Text = "Speed: " .. tostring(Modules.SpeedModule.Get() or Humanoid.WalkSpeed)
-	
-	local speedBox = Instance.new("TextBox", speedCard)
-	speedBox.Size = UDim2.new(1, -16, 0, 32)
-	speedBox.Position = UDim2.new(0, 8, 0, 38)
-	speedBox.PlaceholderText = "Enter speed (default: 16)"
-	speedBox.ClearTextOnFocus = false
-	speedBox.BackgroundColor3 = Color3.fromRGB(36,36,36)
-	speedBox.TextColor3 = Color3.fromRGB(245,245,245)
-	speedBox.Font = Enum.Font.Gotham
-	speedBox.TextSize = 13
-	speedBox.Text = tostring(Modules.SpeedModule.Get() or Humanoid.WalkSpeed)
-	local speedCorner = Instance.new("UICorner", speedBox); speedCorner.CornerRadius = UDim.new(0,6)
-	
-	-- When user presses Enter or deselects
-	speedBox.FocusLost:Connect(function(enterPressed)
-		if enterPressed then
-			local newVal = tonumber(speedBox.Text)
-			if newVal then
-				Modules.SpeedModule.Set(newVal)
-				speedLabel.Text = "Speed: " .. tostring(newVal)
-			else
-				speedBox.Text = tostring(Modules.SpeedModule.Get())
-			end
-		end
-	end)
+
+	local speedTrack = Instance.new("Frame", speedCard)
+	speedTrack.Size = UDim2.new(1, -16, 0, 8)
+	speedTrack.Position = UDim2.new(0, 8, 0, 38)
+	speedTrack.BackgroundColor3 = Color3.fromRGB(64,64,64)
+	local stCorner = Instance.new("UICorner", speedTrack); stCorner.CornerRadius = UDim.new(0,5)
+	local speedKnob = Instance.new("ImageButton", speedCard)
+	speedKnob.Size = UDim2.new(0, 14, 0, 14)
+	speedKnob.AnchorPoint = Vector2.new(0, 0.5)
+	local initSpeed = Modules.SpeedModule.Get() or Humanoid.WalkSpeed
+	local minSpeed, maxSpeed = 10, 500
+	local speedNorm = (initSpeed - minSpeed)/(maxSpeed - minSpeed)
+	speedKnob.Position = UDim2.new(math.clamp(speedNorm, 0, 1), -7, 0, 45)
+	speedKnob.Image = "rbxassetid://3570695787"
+	speedKnob.BackgroundTransparency = 1
 
 	-- Jump card (slider)
 	local jumpCard = createCard(90)
