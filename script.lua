@@ -545,7 +545,7 @@ do
 		noclipBtn.Text = active and "No-Clip: ON" or "Toggle No-Clip"
 	end)
 
-	-- Speed card (slider)
+		-- Speed card (textbox)
 	local speedCard = createCard(90)
 	local speedLabel = Instance.new("TextLabel", speedCard)
 	speedLabel.Size = UDim2.new(1, -16, 0, 18)
@@ -555,21 +555,31 @@ do
 	speedLabel.TextSize = 12
 	speedLabel.TextColor3 = Color3.fromRGB(220,220,220)
 	speedLabel.Text = "Speed: " .. tostring(Modules.SpeedModule.Get() or Humanoid.WalkSpeed)
-
-	local speedTrack = Instance.new("Frame", speedCard)
-	speedTrack.Size = UDim2.new(1, -16, 0, 8)
-	speedTrack.Position = UDim2.new(0, 8, 0, 38)
-	speedTrack.BackgroundColor3 = Color3.fromRGB(64,64,64)
-	local stCorner = Instance.new("UICorner", speedTrack); stCorner.CornerRadius = UDim.new(0,5)
-	local speedKnob = Instance.new("ImageButton", speedCard)
-	speedKnob.Size = UDim2.new(0, 14, 0, 14)
-	speedKnob.AnchorPoint = Vector2.new(0, 0.5)
-	local initSpeed = Modules.SpeedModule.Get() or Humanoid.WalkSpeed
-	local minSpeed, maxSpeed = 10, 500
-	local speedNorm = (initSpeed - minSpeed)/(maxSpeed - minSpeed)
-	speedKnob.Position = UDim2.new(math.clamp(speedNorm, 0, 1), -7, 0, 45)
-	speedKnob.Image = "rbxassetid://3570695787"
-	speedKnob.BackgroundTransparency = 1
+	
+	local speedBox = Instance.new("TextBox", speedCard)
+	speedBox.Size = UDim2.new(1, -16, 0, 32)
+	speedBox.Position = UDim2.new(0, 8, 0, 38)
+	speedBox.PlaceholderText = "Enter speed (default: 16)"
+	speedBox.ClearTextOnFocus = false
+	speedBox.BackgroundColor3 = Color3.fromRGB(36,36,36)
+	speedBox.TextColor3 = Color3.fromRGB(245,245,245)
+	speedBox.Font = Enum.Font.Gotham
+	speedBox.TextSize = 13
+	speedBox.Text = tostring(Modules.SpeedModule.Get() or Humanoid.WalkSpeed)
+	local speedCorner = Instance.new("UICorner", speedBox); speedCorner.CornerRadius = UDim.new(0,6)
+	
+	-- When user presses Enter or deselects
+	speedBox.FocusLost:Connect(function(enterPressed)
+		if enterPressed then
+			local newVal = tonumber(speedBox.Text)
+			if newVal then
+				Modules.SpeedModule.Set(newVal)
+				speedLabel.Text = "Speed: " .. tostring(newVal)
+			else
+				speedBox.Text = tostring(Modules.SpeedModule.Get())
+			end
+		end
+	end)
 
 	-- Jump card (slider)
 	local jumpCard = createCard(90)
