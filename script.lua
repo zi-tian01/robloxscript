@@ -37,25 +37,31 @@ end)
 local Modules = {}
 
 -- Fly Module (local)
+-- Fly Module (modern physics, local-only)
 Modules.FlyModule = (function()
 	local M = {}
 	local active = false
-	local bg, bv
+	local align, force
 	local speed = 80
 
 	local function createControllers()
-		if bg then bg:Destroy() end
-		if bv then bv:Destroy() end
-		bg = Instance.new("BodyGyro")
-		bg.P = 9e4
-		bg.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
-		bg.CFrame = HRP.CFrame
-		bg.Parent = HRP
+		if align then align:Destroy() end
+		if force then force:Destroy() end
 
-		bv = Instance.new("BodyVelocity")
-		bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-		bv.Velocity = Vector3.new(0,0,0)
-		bv.Parent = HRP
+		align = Instance.new("AlignOrientation")
+		align.Mode = Enum.OrientationAlignmentMode.OneAttachment
+		align.MaxAngularVelocity = math.huge
+		align.MaxTorque = math.huge
+		align.Responsiveness = 200
+		align.Attachment0 = Instance.new("Attachment", HRP)
+		align.Parent = HRP
+
+		force = Instance.new("VectorForce")
+		force.Force = Vector3.zero
+		force.ApplyAtCenterOfMass = true
+		force.Attachment0 = align.Attachment0
+		force.RelativeTo = Enum.ActuatorRelativeTo.World
+		force.Parent = HRP
 	end
 
 	function M.Toggle()
@@ -65,45 +71,51 @@ Modules.FlyModule = (function()
 			createControllers()
 			Humanoid.PlatformStand = true
 		else
-			if bg then bg:Destroy(); bg = nil end
-			if bv then bv:Destroy(); bv = nil end
+			if align then align:Destroy(); align = nil end
+			if force then force:Destroy(); force = nil end
 			Humanoid.PlatformStand = false
 		end
 		return active
 	end
 
 	function M.Update(dt)
-		if not active or not bg or not bv or not Camera then return end
-		-- keep gyro aligned with camera for smooth control
-		bg.CFrame = CFrame.new(HRP.Position, HRP.Position + Camera.CFrame.LookVector)
-		local move = Vector3.new(0,0,0)
-		if UIS:IsKeyDown(Enum.KeyCode.W) then move = move + (Camera.CFrame.LookVector) end
-		if UIS:IsKeyDown(Enum.KeyCode.S) then move = move - (Camera.CFrame.LookVector) end
-		if UIS:IsKeyDown(Enum.KeyCode.A) then move = move - (Camera.CFrame.RightVector) end
-		if UIS:IsKeyDown(Enum.KeyCode.D) then move = move + (Camera.CFrame.RightVector) end
-		if UIS:IsKeyDown(Enum.KeyCode.Space) then move = move + Vector3.new(0,1,0) end
-		if UIS:IsKeyDown(Enum.KeyCode.LeftShift) then move = move - Vector3.new(0,1,0) end
+		if not active or not align or not force or not Camera then return end
 
-		local vel = Vector3.zero
-		if move.Magnitude > 0.001 then
-			vel = move.Unit * speed
+		-- Align player to camera direction
+		align.CFrame = CFrame.lookAt(HRP.Position, HRP.Position + Camera.CFrame.LookVector)
+
+		-- Movement vector
+		local move = Vector3.zero
+		if UIS:IsKeyDown(Enum.KeyCode.W) then move += Camera.CFrame.LookVector end
+		if UIS:IsKeyDown(Enum.KeyCode.S) then move -= Camera.CFrame.LookVector end
+		if UIS:IsKeyDown(Enum.KeyCode.A) then move -= Camera.CFrame.RightVector end
+		if UIS:IsKeyDown(Enum.KeyCode.D) then move += Camera.CFrame.RightVector end
+		if UIS:IsKeyDown(Enum.KeyCode.Space) then move += Vector3.yAxis end
+		if UIS:IsKeyDown(Enum.KeyCode.LeftShift) then move -= Vector3.yAxis end
+
+		if move.Magnitude > 0 then
+			force.Force = move.Unit * speed * 100 -- scaled by mass later
+		else
+			force.Force = Vector3.zero
 		end
-		-- preserve small Y velocity from gravity when not pressing vertical keys? we intentionally set full velocity
-		bv.Velocity = Vector3.new(vel.X, vel.Y, vel.Z)
 	end
 
-	function M.SetSpeed(v) speed = math.max(0, v or speed) end
+	function M.SetSpeed(v)
+		speed = math.max(0, v or speed)
+	end
+
 	function M.IsActive() return active end
 
 	function M.Cleanup()
-		if bg then bg:Destroy(); bg = nil end
-		if bv then bv:Destroy(); bv = nil end
+		if align then align:Destroy() end
+		if force then force:Destroy() end
 		active = false
 		if Humanoid then Humanoid.PlatformStand = false end
 	end
 
 	return M
 end)()
+
 
 -- Noclip Module (local-only)
 Modules.NoclipModule = (function()
